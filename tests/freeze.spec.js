@@ -1,3 +1,51 @@
+看快照，页面已经在 Dashboard 了，但脚本还在等跳转。问题是：**OAuth 处理完后页面已经到了 dashboard，但 `waitForURL` 没捕捉到这个状态**，因为跳转在 `waitForURL` 开始监听之前就已经完成了。
+
+直接改成检查当前 URL，不等跳转：
+
+```javascript
+// ── 等待最终落地 dashboard ────────────────────────────
+console.log('⏳ 等待跳转 Dashboard...');
+try {
+    await page.waitForURL(
+        url => url.includes('/callback') || url.includes('/dashboard'),
+        { timeout: 10000 }
+    );
+} catch {
+    // 可能已经在 dashboard 了，检查当前 URL
+}
+
+// 如果在 callback，继续等 dashboard
+if (page.url().includes('/callback')) {
+    await page.waitForURL(/free\.freezehost\.pro\/dashboard/);
+}
+
+// 如果既不在 callback 也不在 dashboard，报错
+if (!page.url().includes('/dashboard')) {
+    throw new Error(`❌ 登录后未到达 Dashboard，当前 URL: ${page.url()}`);
+}
+console.log(`✅ 登录成功！当前：${page.url()}`);
+```
+
+同时 OAuth 那段也要改，**处理完授权后要等页面真正离开 Discord**：
+
+```javascript
+console.log('⏳ 等待 OAuth 授权...');
+try {
+    await page.waitForURL(/discord\.com\/oauth2\/authorize/, { timeout: 6000 });
+    console.log('🔍 进入 OAuth 授权页，处理中...');
+    await page.waitForTimeout(2000);
+    await handleOAuthPage(page);
+    // 等待离开 Discord
+    await page.waitForURL(/free\.freezehost\.pro/, { timeout: 15000 });
+    console.log(`✅ 已离开 Discord，当前：${page.url()}`);
+} catch {
+    console.log(`✅ 静默授权或已跳转，当前：${page.url()}`);
+}
+```
+
+完整 `freeze.spec.js`：
+
+```javascript
 // tests/freeze.spec.js
 const { test, expect, chromium } = require('@playwright/test');
 const https = require('https');
@@ -184,26 +232,37 @@ test('FreezeHost 自动续期', async () => {
             throw new Error(`❌ Discord 登录失败: ${err}`);
         }
 
+        // ── OAuth 授权 ────────────────────────────────────────
         console.log('⏳ 等待 OAuth 授权...');
         try {
             await page.waitForURL(/discord\.com\/oauth2\/authorize/, { timeout: 6000 });
             console.log('🔍 进入 OAuth 授权页，处理中...');
             await page.waitForTimeout(2000);
             await handleOAuthPage(page);
+            // 等待离开 Discord
+            await page.waitForURL(/free\.freezehost\.pro/, { timeout: 15000 });
+            console.log(`✅ 已离开 Discord，当前：${page.url()}`);
         } catch {
-            console.log('✅ prompt=none 静默授权，无需手动点击');
+            console.log(`✅ 静默授权或已跳转，当前：${page.url()}`);
         }
 
-        // ── 等待最终落地 dashboard ────────────────────────────
-        console.log('⏳ 等待跳转 Dashboard...');
-        await page.waitForURL(
-            url => url.includes('/callback') || url.includes('/dashboard'),
-            { timeout: 30000 }
-        );
+        // ── 确认到达 Dashboard ────────────────────────────────
+        console.log('⏳ 确认到达 Dashboard...');
+        try {
+            await page.waitForURL(
+                url => url.includes('/callback') || url.includes('/dashboard'),
+                { timeout: 10000 }
+            );
+        } catch { /* 可能已经在 dashboard */ }
+
         if (page.url().includes('/callback')) {
             await page.waitForURL(/free\.freezehost\.pro\/dashboard/);
         }
-        console.log('✅ 登录成功！');
+
+        if (!page.url().includes('/dashboard')) {
+            throw new Error(`❌ 未到达 Dashboard，当前 URL: ${page.url()}`);
+        }
+        console.log(`✅ 登录成功！当前：${page.url()}`);
 
         // ── 续期 ──────────────────────────────────────────────
         console.log('🔍 查找 Manage 按钮...');
@@ -255,3 +314,4 @@ test('FreezeHost 自动续期', async () => {
         await browser.close();
     }
 });
+```
