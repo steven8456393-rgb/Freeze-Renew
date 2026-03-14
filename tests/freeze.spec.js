@@ -249,13 +249,15 @@ test('FreezeHost 自动续期', async () => {
 
         // ── 点击 RENEW ────────────────────────────────────────
         console.log('🔍 查找 RENEW 按钮...');
+        await page.waitForTimeout(3000); // 等页面加载完
+
         const renewUrl = await page.evaluate(() => {
             const link = document.getElementById('renew-link');
             return link ? link.href : null;
         });
 
-        if (!renewUrl) {
-            throw new Error('❌ 未找到 renew-link');
+        if (!renewUrl || renewUrl.endsWith('#')) {
+            throw new Error(`❌ renew-link 未加载或无效：${renewUrl}`);
         }
 
         console.log(`✅ 找到 RENEW 链接：${renewUrl}`);
@@ -263,11 +265,10 @@ test('FreezeHost 自动续期', async () => {
         console.log('📤 已跳转 RENEW，等待结果...');
 
         await page.waitForURL(
-            url => url.includes('/dashboard') || url.includes('/server-console'),
+            url => url.toString().includes('/dashboard') || url.toString().includes('/server-console'),
             { timeout: 30000 }
         );
         const finalUrl = page.url();
-        console.log(`📄 最终跳转地址：${finalUrl}`);
 
         // ── 结果判断 ──────────────────────────────────────────
         if (finalUrl.includes('success=RENEWED')) {
