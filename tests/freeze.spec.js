@@ -300,12 +300,10 @@ test('FreezeHost 自动续期', async () => {
         await renewModalBtn.waitFor({ state: 'visible', timeout: 10000 });
 
         const btnText = (await renewModalBtn.innerText()).trim();
-        const btnClass = (await renewModalBtn.getAttribute('class')) || '';
-        const isDisabled = btnClass.includes('pointer-events-none') || btnClass.includes('opacity-50');
+        console.log(`📋 续期按钮文字："${btnText}"`);
 
-        console.log(`📋 续期按钮文字："${btnText}"，禁用：${isDisabled}`);
-
-        if (isDisabled || btnText.toLowerCase().includes('not renewable')) {
+        if (!btnText.toLowerCase().includes('renew instance')) {
+            // 文字不是 "Renew Instance"，说明尚未到续期时间
             const msg = `⏰ 尚未到续期时间（按钮状态：${btnText}）`;
             console.log(msg);
             await sendTG('⏰ 尚未到续期时间，今日已续期或暂不需要续期');
@@ -319,8 +317,10 @@ test('FreezeHost 自动续期', async () => {
             throw new Error(`❌ renew-link-modal href 无效：${renewHref}`);
         }
 
-        console.log(`✅ 找到 RENEW 链接：${renewHref}`);
-        await page.goto(renewHref, { waitUntil: 'domcontentloaded' });
+        // href 可能是相对路径（如 ../renew?id=xxxxx），转为绝对 URL
+        const renewAbsUrl = new URL(renewHref, page.url()).href;
+        console.log(`✅ 找到 RENEW 链接：${renewAbsUrl}`);
+        await page.goto(renewAbsUrl, { waitUntil: 'domcontentloaded' });
         console.log('📤 已跳转 RENEW，等待结果...');
 
         await page.waitForURL(
