@@ -40,6 +40,7 @@ jobs:
 
       - name: 🚀 运行续期脚本
         env:
+          DISCORD_TOKEN:   ${{ secrets.DISCORD_TOKEN }}
           DISCORD_ACCOUNT: ${{ secrets.DISCORD_ACCOUNT }}
           TG_BOT:          ${{ secrets.TG_BOT }}
           GOST_PROXY:      http://127.0.0.1:8080
