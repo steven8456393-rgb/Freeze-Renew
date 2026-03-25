@@ -258,16 +258,26 @@ test('FreezeHost 自动续期', async () => {
             }
         }
 
-        // 执行续期点击
-        const externalLinkIcon = page.locator('i.fa-external-link-alt').first();
-        const parentEl = externalLinkIcon.locator('xpath=..');
-        await parentEl.hover();
-        await page.waitForTimeout(1000);
-        await externalLinkIcon.click({ force: true });
+        // ── 强制触发续期弹窗 (绕过遮挡和多余按钮) ───────────────
+        console.log('🔍 强制绕过遮挡，直接触发续期弹窗...');
+        await page.evaluate(() => {
+            const icons = document.querySelectorAll('i.fa-external-link-alt');
+            icons.forEach(icon => {
+                const parent = icon.closest('button') || icon.parentElement;
+                // 过滤掉评价弹窗按钮
+                if (parent && !parent.outerHTML.includes('reviewAction')) {
+                    parent.click();
+                }
+            });
+        });
+        await page.waitForTimeout(2000);
         
         const renewModalBtn = page.locator('#renew-link-modal');
-        await renewModalBtn.waitFor({ state: 'visible' });
-        const btnText = (await renewModalBtn.innerText()).trim();
+        // 使用 attached 防止因为被遮挡而报错 Timeout
+        await renewModalBtn.waitFor({ state: 'attached', timeout: 10000 });
+        
+        const btnText = await renewModalBtn.evaluate(el => el.textContent || '');
+        console.log(`📋 续期按钮文字："${btnText.trim()}"`);
 
         if (!btnText.toLowerCase().includes('renew instance')) {
             await sendTG('⏰ 尚未到续期时间，今日已续期或暂不需要续期');
