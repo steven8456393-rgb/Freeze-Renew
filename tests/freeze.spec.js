@@ -230,7 +230,7 @@ test('FreezeHost 自动续期', async () => {
         console.log('🔍 查找所有服务器的 Manage 按钮...');
         await page.waitForTimeout(3000);
         
-        // 修改点 1：抓取所有 server-console 链接，存为数组
+        // 抓取所有 server-console 链接，存为数组
         const serverUrls = await page.evaluate(() => {
             const links = document.querySelectorAll('a[href*="server-console"]');
             return Array.from(links).map(link => link.href);
@@ -245,7 +245,7 @@ test('FreezeHost 自动续期', async () => {
         // 用于收集所有服务器的执行结果
         let allResults = [];
 
-        // 修改点 2：加入 for 循环遍历处理每一台服务器
+        // 加入 for 循环遍历处理每一台服务器
         for (let i = 0; i < serverUrls.length; i++) {
             const currentUrl = serverUrls[i];
             console.log(`\n⚙️ 正在处理第 ${i + 1}/${serverUrls.length} 台服务器...`);
@@ -266,4 +266,90 @@ test('FreezeHost 自动续期', async () => {
                     const daysMatch = renewalStatusText.match(/(\d+(?:\.\d+)?)\s*day/i);
                     const remainingDays = daysMatch ? parseFloat(daysMatch[1]) : null;
                     if (remainingDays !== null && remainingDays > 7) {
-                        const msg = `[第 ${i +
+                        const msg = `[第 ${i + 1} 台] 剩余 ${remainingDays} 天 (跳过)`;
+                        console.log(`⏰ ${msg}`);
+                        allResults.push(msg);
+                        continue; // 天数充足，跳过，进入下一轮循环
+                    }
+                }
+
+                // 强制触发续期弹窗
+                console.log('🔍 强制触发续期弹窗...');
+                await page.evaluate(() => {
+                    const icons = document.querySelectorAll('i.fa-external-link-alt');
+                    icons.forEach(icon => {
+                        const parent = icon.closest('button') || icon.parentElement;
+                        if (parent && !parent.outerHTML.includes('reviewAction')) {
+                            parent.click();
+                        }
+                    });
+                });
+                await page.waitForTimeout(2000);
+                
+                const renewModalBtn = page.locator('#renew-link-modal');
+                
+                // 增加容错：如果找不到按钮不让整个脚本崩溃，而是记录失败并继续下一台
+                let btnVisible = true;
+                try {
+                    await renewModalBtn.waitFor({ state: 'attached', timeout: 5000 });
+                } catch {
+                    btnVisible = false;
+                }
+
+                if (!btnVisible) {
+                    const msg = `[第 ${i + 1} 台] ❌ 未找到弹窗续期按钮`;
+                    console.log(msg);
+                    allResults.push(msg);
+                    continue;
+                }
+                
+                const btnText = await renewModalBtn.evaluate(el => el.textContent || '');
+                console.log(`📋 弹窗按钮文字："${btnText.trim()}"`);
+
+                if (!btnText.toLowerCase().includes('renew instance')) {
+                    const msg = `[第 ${i + 1} 台] ⏰ 今日已续期或不可续`;
+                    console.log(msg);
+                    allResults.push(msg);
+                    continue;
+                }
+
+                const renewHref = await renewModalBtn.getAttribute('href');
+                const renewAbsUrl = new URL(renewHref, page.url()).href;
+                await page.goto(renewAbsUrl, { waitUntil: 'domcontentloaded' });
+
+                // 结果判断
+                await page.waitForURL(/success=RENEWED|err=/, { timeout: 30000 });
+                const finalUrl = page.url();
+
+                if (finalUrl.includes('success=RENEWED')) {
+                    const msg = `[第 ${i + 1} 台] ✅ 续期成功`;
+                    console.log(msg);
+                    allResults.push(msg);
+                } else if (finalUrl.includes('err=CANNOTAFFORDRENEWAL')) {
+                    const msg = `[第 ${i + 1} 台] ⚠️ 余额(Coins)不足`;
+                    console.log(msg);
+                    allResults.push(msg);
+                } else {
+                    const msg = `[第 ${i + 1} 台] ⚠️ 结果未知`;
+                    console.log(msg);
+                    allResults.push(msg);
+                }
+
+            } catch (serverErr) {
+                const errMsg = serverErr.message.split('\n')[0]; // 取报错第一行
+                const msg = `[第 ${i + 1} 台] ❌ 处理异常: ${errMsg}`;
+                console.log(msg);
+                allResults.push(msg);
+            }
+        } // 循环结束
+
+        // 统一推送所有服务器的执行结果
+        await sendTG(allResults.join('\n'));
+
+    } catch (e) {
+        await sendTG(`❌ 脚本全局异常：${e.message}`);
+        throw e;
+    } finally {
+        await browser.close();
+    }
+});
