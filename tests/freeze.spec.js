@@ -28,7 +28,7 @@ function sendTG(result) {
             `🎮 FreezeHost 续期通知`,
             `🕐 运行时间: ${nowStr()}`,
             `🖥 服务器: FreezeHost Free`,
-            `📊 续期结果: ${result}`,
+            `📊 续期结果: \n${result}`,
         ].join('\n');
 
         const body = JSON.stringify({ chat_id: TG_CHAT_ID, text: msg });
@@ -223,87 +223,47 @@ test('FreezeHost 自动续期', async () => {
             console.log('✅ 自动授权或已跳转');
         }
 
-        // ── 确认到达 Dashboard ────────────────────────────────
+        // ── 确认到达 Dashboard 并抓取所有服务器 ────────────────
         await page.waitForURL(/free\.freezehost\.pro\/dashboard/, { timeout: 30000 });
         console.log(`✅ 登录成功！当前：${page.url()}`);
 
-        // ── 进入 Server Console ───────────────────────────────
-        console.log('🔍 查找 Manage 按钮...');
+        console.log('🔍 查找所有服务器的 Manage 按钮...');
         await page.waitForTimeout(3000);
-        const serverUrl = await page.evaluate(() => {
-            const link = document.querySelector('a[href*="server-console"]');
-            return link ? link.href : null;
-        });
-
-        if (!serverUrl) throw new Error('❌ 未找到 server-console 链接');
-        await page.goto(serverUrl, { waitUntil: 'domcontentloaded' });
-
-        // ── 续期逻辑 ──────────────────────────────────────────
-        console.log('🔍 读取续期状态...');
-        await page.waitForTimeout(3000);
-        const renewalStatusText = await page.evaluate(() => {
-            const el = document.getElementById('renewal-status-console');
-            return el ? el.innerText.trim() : null;
-        });
-        console.log(`📋 续期状态：${renewalStatusText}`);
-
-        if (renewalStatusText) {
-            const daysMatch = renewalStatusText.match(/(\d+(?:\.\d+)?)\s*day/i);
-            const remainingDays = daysMatch ? parseFloat(daysMatch[1]) : null;
-            if (remainingDays !== null && remainingDays > 7) {
-                const msg = `⏰ 剩余 ${remainingDays} 天，无需续期（需 ≤7 天才续期）`;
-                console.log(msg);
-                await sendTG(msg);
-                return;
-            }
-        }
-
-        // ── 强制触发续期弹窗 (绕过遮挡和多余按钮) ───────────────
-        console.log('🔍 强制绕过遮挡，直接触发续期弹窗...');
-        await page.evaluate(() => {
-            const icons = document.querySelectorAll('i.fa-external-link-alt');
-            icons.forEach(icon => {
-                const parent = icon.closest('button') || icon.parentElement;
-                // 过滤掉评价弹窗按钮
-                if (parent && !parent.outerHTML.includes('reviewAction')) {
-                    parent.click();
-                }
-            });
-        });
-        await page.waitForTimeout(2000);
         
-        const renewModalBtn = page.locator('#renew-link-modal');
-        // 使用 attached 防止因为被遮挡而报错 Timeout
-        await renewModalBtn.waitFor({ state: 'attached', timeout: 10000 });
+        // 修改点 1：抓取所有 server-console 链接，存为数组
+        const serverUrls = await page.evaluate(() => {
+            const links = document.querySelectorAll('a[href*="server-console"]');
+            return Array.from(links).map(link => link.href);
+        });
+
+        if (!serverUrls || serverUrls.length === 0) {
+            throw new Error('❌ 未找到任何 server-console 链接');
+        }
         
-        const btnText = await renewModalBtn.evaluate(el => el.textContent || '');
-        console.log(`📋 续期按钮文字："${btnText.trim()}"`);
+        console.log(`📋 共发现 ${serverUrls.length} 台服务器待处理`);
 
-        if (!btnText.toLowerCase().includes('renew instance')) {
-            await sendTG('⏰ 尚未到续期时间，今日已续期或暂不需要续期');
-            return;
-        }
+        // 用于收集所有服务器的执行结果
+        let allResults = [];
 
-        const renewHref = await renewModalBtn.getAttribute('href');
-        const renewAbsUrl = new URL(renewHref, page.url()).href;
-        await page.goto(renewAbsUrl, { waitUntil: 'domcontentloaded' });
+        // 修改点 2：加入 for 循环遍历处理每一台服务器
+        for (let i = 0; i < serverUrls.length; i++) {
+            const currentUrl = serverUrls[i];
+            console.log(`\n⚙️ 正在处理第 ${i + 1}/${serverUrls.length} 台服务器...`);
+            
+            try {
+                await page.goto(currentUrl, { waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(3000);
 
-        // 结果判断
-        await page.waitForURL(/success=RENEWED|err=/, { timeout: 30000 });
-        const finalUrl = page.url();
+                // 读取续期状态
+                console.log(`🔍 读取第 ${i + 1} 台续期状态...`);
+                const renewalStatusText = await page.evaluate(() => {
+                    const el = document.getElementById('renewal-status-console');
+                    return el ? el.innerText.trim() : null;
+                });
+                console.log(`📋 状态：${renewalStatusText}`);
 
-        if (finalUrl.includes('success=RENEWED')) {
-            await sendTG('✅ 续期成功！');
-        } else if (finalUrl.includes('err=CANNOTAFFORDRENEWAL')) {
-            await sendTG('⚠️ 余额不足，请挂机赚取金币');
-        } else {
-            await sendTG(`⚠️ 续期结果未知：${finalUrl}`);
-        }
-
-    } catch (e) {
-        await sendTG(`❌ 脚本异常：${e.message}`);
-        throw e;
-    } finally {
-        await browser.close();
-    }
-});
+                if (renewalStatusText) {
+                    const daysMatch = renewalStatusText.match(/(\d+(?:\.\d+)?)\s*day/i);
+                    const remainingDays = daysMatch ? parseFloat(daysMatch[1]) : null;
+                    if (remainingDays !== null && remainingDays > 7) {
+                        const msg = `[第 ${i +
