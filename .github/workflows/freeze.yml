@@ -1,8 +1,10 @@
 name: 🎮 FreezeHost 自动续期
 on:
   schedule:
-    - cron: '0 8 */10 * *'
-  workflow_dispatch:
+    # 每天 UTC 08:00 (北京时间 16:00) 运行，每隔 3 天执行一次
+    - cron: '0 8 */3 * *'
+  workflow_dispatch: # 保留手动触发按钮
+
 jobs:
   renew:
     name: 🔄 执行续期
